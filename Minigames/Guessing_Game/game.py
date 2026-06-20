@@ -11,6 +11,7 @@ live feedback, but jitter does not count — only the moment SPACE is pressed.
 """
 
 import random
+import subprocess
 from enum import Enum, auto
 
 import cv2
@@ -92,6 +93,43 @@ class _PiCamera2:
         self._cam.stop()
 
 
+class _SubprocessCamera:
+    """
+    Reads raw YUV420 frames from rpicam-vid via stdout.
+    Works from any Python version/env because rpicam-vid is a system binary
+    that uses libcamera directly — bypassing the Python libcamera bindings.
+    """
+
+    def __init__(self, width: int, height: int) -> None:
+        self._width = width
+        self._height = height
+        self._frame_bytes = width * height * 3 // 2  # I420 planar
+        self._proc = subprocess.Popen(
+            [
+                'rpicam-vid', '-t', '0',
+                '--width', str(width), '--height', str(height),
+                '--codec', 'yuv420', '--framerate', '30',
+                '-n', '-o', '-',
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            bufsize=0,
+        )
+
+    def read(self) -> tuple[bool, np.ndarray]:
+        raw = self._proc.stdout.read(self._frame_bytes)
+        if len(raw) < self._frame_bytes:
+            return False, None
+        yuv = np.frombuffer(raw, dtype=np.uint8).reshape(
+            (self._height * 3 // 2, self._width)
+        )
+        return True, cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+
+    def release(self) -> None:
+        self._proc.terminate()
+        self._proc.wait()
+
+
 def _open_camera():
     """Open the camera source specified by config.CAMERA_BACKEND.
 
@@ -100,6 +138,8 @@ def _open_camera():
     backend = getattr(config, "CAMERA_BACKEND", "opencv")
     if backend == "picamera2":
         return _PiCamera2(config.FRAME_WIDTH, config.FRAME_HEIGHT)
+    if backend == "rpicam":
+        return _SubprocessCamera(config.FRAME_WIDTH, config.FRAME_HEIGHT)
 
     # opencv path — try configured index, then fall back
     cap = cv2.VideoCapture(config.CAMERA_INDEX)
