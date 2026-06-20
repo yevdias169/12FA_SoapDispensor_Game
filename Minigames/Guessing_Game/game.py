@@ -113,7 +113,6 @@ class _SubprocessCamera:
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            bufsize=0,
         )
 
     def read(self) -> tuple[bool, np.ndarray]:
