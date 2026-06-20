@@ -61,8 +61,47 @@ def _text(screen, text, font, color, x, y, *, center=False):
     screen.blit(surf, r)
 
 
-def _open_camera() -> cv2.VideoCapture:
-    """Try config.CAMERA_INDEX, then fall back to the other common index."""
+class _PiCamera2:
+    """
+    Thin picamera2 wrapper with a cv2.VideoCapture-compatible interface
+    (read() → (ok, bgr_frame), release()).
+    picamera2 is imported lazily so this file remains importable on macOS.
+    """
+
+    def __init__(self, width: int, height: int) -> None:
+        try:
+            from picamera2 import Picamera2
+        except ImportError as exc:
+            raise ImportError(
+                "picamera2 is not installed. On Raspberry Pi: "
+                "sudo apt install -y python3-picamera2"
+            ) from exc
+        self._cam = Picamera2()
+        cam_cfg = self._cam.create_video_configuration(
+            main={"format": "XRGB8888", "size": (width, height)}
+        )
+        self._cam.configure(cam_cfg)
+        self._cam.start()
+
+    def read(self) -> tuple[bool, np.ndarray]:
+        # picamera2 returns XRGB (4 ch, channel 0 is padding); convert to BGR
+        frame = self._cam.capture_array()
+        return True, cv2.cvtColor(frame, cv2.COLOR_RGBA2BGR)
+
+    def release(self) -> None:
+        self._cam.stop()
+
+
+def _open_camera():
+    """Open the camera source specified by config.CAMERA_BACKEND.
+
+    Returns an object with .read() -> (ok, bgr_frame) and .release().
+    """
+    backend = getattr(config, "CAMERA_BACKEND", "opencv")
+    if backend == "picamera2":
+        return _PiCamera2(config.FRAME_WIDTH, config.FRAME_HEIGHT)
+
+    # opencv path — try configured index, then fall back
     cap = cv2.VideoCapture(config.CAMERA_INDEX)
     if cap.isOpened():
         return cap
