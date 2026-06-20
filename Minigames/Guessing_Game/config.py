@@ -10,7 +10,7 @@ HAND_LANDMARKER_PATH = os.path.join(_ROOT, 'hand_landmarker.task')
 # Camera backend:
 #   "opencv"    — USB webcam / built-in camera (macOS, Pi USB)
 #   "picamera2" — Raspberry Pi Camera Module via ribbon cable
-CAMERA_BACKEND = "picamera2"
+CAMERA_BACKEND = "opencv"
 
 # Resolution used when capturing frames.
 # picamera2 requires explicit dimensions; opencv uses these as hints.
