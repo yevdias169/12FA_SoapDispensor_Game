@@ -378,38 +378,74 @@ class RubiksCheckerScene:
 # Standalone runner
 # ---------------------------------------------------------------------------
 
-def run_rubiks_checker(
-    screen: pygame.Surface | None = None,
-    cfg=None,
-) -> RubiksResult:
+def run_rubiks_checker(screen=None, clock=None, cfg=None):
     """
-    Creates its own window if screen is None, runs an internal pygame loop
-    until the scene finishes, then returns the result.
-    Releases the camera before returning so the caller can reuse the device.
+    Master-launcher contract:
+        run_rubiks_checker(screen, clock) -> "done" | "skip" | "quit"
+    Reuses the passed-in screen/clock and never calls pygame.init()/quit().
+
+    Called with no arguments it runs standalone (creates its own window), so
+    `python minigames/rubiks_checker.py` still works unchanged.
     """
     cfg = cfg or config
-    own_window = screen is None
+    embedded   = screen is not None
+    own_window = not embedded
 
     if own_window:
         pygame.init()
         screen = pygame.display.set_mode(cfg.WINDOW_SIZE)
         pygame.display.set_caption("Rubik's Cube Verifier")
+    if clock is None:
+        clock = pygame.time.Clock()
 
-    clock = pygame.time.Clock()
-    scene = RubiksCheckerScene(screen, cfg=cfg)
+    # When launched by the master hub, grab it for the skip button/hotkey hooks.
+    _m = None
+    if embedded:
+        import sys as _sys
+        _m = _sys.modules.get("master")
 
-    running = True
-    while running:
-        dt = clock.tick(cfg.FPS) / 1000.0
-        scene.handle_events(pygame.event.get())
-        scene.update(dt)
-        scene.draw(screen)
-        pygame.display.flip()
-        if scene.finished:
-            running = False
+    # The scene self-destructs (pygame.quit + sys.exit) on completion when
+    # TERMINATE_ON_COMPLETE is set — that would kill the launcher. Suppress it
+    # while embedded and restore afterwards.
+    _prev_terminate = getattr(cfg, "TERMINATE_ON_COMPLETE", True)
+    if embedded:
+        cfg.TERMINATE_ON_COMPLETE = False
 
-    result = scene.result
-    scene.close()
+    try:
+        scene = RubiksCheckerScene(screen, cfg=cfg)
+
+        result  = "done"
+        running = True
+        while running:
+            dt = clock.tick(cfg.FPS) / 1000.0
+
+            events = []
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    result = "quit"; running = False; break
+                if _m is not None and _m.check_skip(event):
+                    result = "skip"; running = False; break
+                events.append(event)
+            if not running:
+                break
+
+            scene.handle_events(events)
+            scene.update(dt)
+            scene.draw(screen)
+            if _m is not None:
+                _m.draw_skip_button(screen)
+            pygame.display.flip()
+
+            if scene.finished:
+                sr = scene.result
+                # ABORTED comes from ESC/quit inside the scene → treat as skip;
+                # SOLVED/FAILED are normal completions.
+                result = "skip" if sr == RubiksResult.ABORTED else "done"
+                running = False
+
+        scene.close()
+    finally:
+        cfg.TERMINATE_ON_COMPLETE = _prev_terminate
 
     if own_window:
         pygame.quit()
@@ -423,4 +459,4 @@ def run_rubiks_checker(
 
 if __name__ == "__main__":
     result = run_rubiks_checker()
-    print(f"Result: {result.value}")
+    print(f"Result: {result}")

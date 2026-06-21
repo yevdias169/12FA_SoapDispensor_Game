@@ -127,21 +127,30 @@ def _open_camera():
     )
 
 
-def run_game():
+def run_game(screen=None, clock=None):
     """
     Entry point for the Finger Guessing Game.
 
-    The pygame master controller should import and call this function:
-        from Guessing_Game import run_game
-        run_game()
+    Master-launcher contract:
+        run_game(screen, clock) -> "done" | "skip" | "quit"
+    Reuses the passed-in screen/clock and never calls pygame.init()/quit().
 
-    Returns cleanly when the game ends. Does NOT call sys.exit() so the
-    parent process keeps running.
+    Called with no arguments it runs standalone (creates its own window), so
+    `python -m Guessing_Game.main` still works unchanged.
     """
-    pygame.init()
-    screen = pygame.display.set_mode((config.WINDOW_WIDTH, config.WINDOW_HEIGHT))
-    pygame.display.set_caption(config.WINDOW_TITLE)
-    clock = pygame.time.Clock()
+    embedded = screen is not None
+    if not embedded:
+        pygame.init()
+        screen = pygame.display.set_mode((config.WINDOW_WIDTH, config.WINDOW_HEIGHT))
+        pygame.display.set_caption(config.WINDOW_TITLE)
+    if clock is None:
+        clock = pygame.time.Clock()
+
+    # When launched by the master hub, grab it for the skip button/hotkey hooks.
+    _m = None
+    if embedded:
+        import sys as _sys
+        _m = _sys.modules.get("master")
 
     font_huge   = pygame.font.SysFont("Arial", 88, bold=True)
     font_medium = pygame.font.SysFont("Arial", 36, bold=True)
@@ -151,7 +160,7 @@ def run_game():
     model = ModelWrapper()
     cap   = _open_camera()
 
-    W, H = config.WINDOW_WIDTH, config.WINDOW_HEIGHT
+    W, H = screen.get_size()
     cx, cy = W // 2, H // 2
 
     target           = random.randint(1, 5)
@@ -160,16 +169,19 @@ def run_game():
     locked_prediction = None  # set on SPACE press
     correct          = False
 
+    result  = "done"
     running = True
     while running:
         # ── Events ──────────────────────────────────────────────────────────
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
+                result = "quit"; running = False; break
+            if _m is not None and _m.check_skip(event):
+                result = "skip"; running = False; break
 
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_q:
-                    running = False
+            if event.type == pygame.KEYDOWN:
+                if _m is None and event.key in (pygame.K_q, pygame.K_ESCAPE):
+                    running = False; break          # standalone quit
 
                 elif state == _State.WAITING and event.key == pygame.K_SPACE:
                     if live_prediction is None:
@@ -181,12 +193,14 @@ def run_game():
 
                 elif state == _State.RESULT:
                     if correct:
-                        running = False          # correct → any key exits
+                        result = "done"; running = False; break  # correct → finished
                     else:
                         # incorrect → retry the same target
                         state             = _State.WAITING
                         live_prediction   = None
                         locked_prediction = None
+        if not running:
+            break
 
         # ── Camera frame ─────────────────────────────────────────────────────
         ret, frame = cap.read()
@@ -215,10 +229,10 @@ def run_game():
             # Bottom instruction bar
             _overlay(screen, 0, H - 54, W, 54)
             if live_prediction is None:
-                msg = "No hand detected — hold a hand in view, then press SPACE  |  Q to quit"
+                msg = "No hand detected — hold a hand in view, then press SPACE"
                 color = config.RED
             else:
-                msg = "Press SPACE to lock in your guess  |  Q to quit"
+                msg = "Press SPACE to lock in your guess"
                 color = config.GRAY
             _text(screen, msg, font_small, color, cx, H - 27, center=True)
 
@@ -228,13 +242,15 @@ def run_game():
 
             if correct:
                 _text(screen, "Correct!", font_huge, config.GREEN, cx, cy - 55, center=True)
-                _text(screen, "Press any key to quit", font_small, config.WHITE, cx, cy + 60, center=True)
+                _text(screen, "Press any key to continue", font_small, config.WHITE, cx, cy + 60, center=True)
             else:
                 _text(screen, "Incorrect", font_huge, config.RED, cx, cy - 55, center=True)
                 _text(screen,
-                      f"You showed {locked_prediction},  target was {target}  —  press any key to try again  |  Q to quit",
+                      f"You showed {locked_prediction},  target was {target}  —  press any key to try again",
                       font_small, config.WHITE, cx, cy + 60, center=True)
 
+        if _m is not None:
+            _m.draw_skip_button(screen)
         pygame.display.flip()
         clock.tick(config.FPS)
 
@@ -242,5 +258,7 @@ def run_game():
     cap.release()
     cv2.destroyAllWindows()
     model.close()
-    pygame.quit()
+    if not embedded:
+        pygame.quit()
     # Intentionally no sys.exit() — caller (master controller) keeps running
+    return result

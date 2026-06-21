@@ -3,11 +3,22 @@
 ### https://github.com/google/mediapipe
 ###############################################################################
 
+import os
+
 import cv2
 import numpy as np
 import mediapipe as mp
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision
+
+# Resolve model .task files relative to THIS file, not the caller's working
+# directory — so the game works whether launched from its own folder or from
+# the master hub at the repo root.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def _model(name):
+    return os.path.join(_HERE, name)
 
 
 # Define default camera intrinsic
@@ -95,7 +106,7 @@ class MediaPipeHand:
         self._running_mode = running_mode
         self._timestamp_ms = 0
 
-        base_options = mp_tasks.BaseOptions(model_asset_path='hand_landmarker.task')
+        base_options = mp_tasks.BaseOptions(model_asset_path=_model('hand_landmarker.task'))
         options = vision.HandLandmarkerOptions(
             base_options=base_options,
             running_mode=running_mode,

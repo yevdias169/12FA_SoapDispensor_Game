@@ -5,8 +5,14 @@
 ### 2) Hand ROM recognition 
 ###############################################################################
 
+import os
+
 import cv2
 import numpy as np
+
+# Resolve data files relative to THIS file, not the caller's working directory,
+# so the game works whether launched from its own folder or the master hub.
+_HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def convert_relative_to_actual_3d_joint_(param, intrin):
@@ -74,7 +80,7 @@ class GestureRecognition:
             self.file = open('../data/gesture_train.csv', 'a+')
         elif mode=='eval':
             # Load training data
-            file = np.genfromtxt('./gesture_train.csv', delimiter=',')
+            file = np.genfromtxt(os.path.join(_HERE, 'gesture_train.csv'), delimiter=',')
             # Extract input joint angles
             angle = file[:,:-1].astype(np.float32)
             # Extract output class label

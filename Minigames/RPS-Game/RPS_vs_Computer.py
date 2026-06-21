@@ -139,20 +139,29 @@ def _draw_hand_skeleton(img, disp, param):
 # Entry point
 # ---------------------------------------------------------------------------
 
-def run():
+def run(screen=None, clock=None):
     """Run the RPS minigame.
 
-    Creates its own pygame window and runs until the player wins or quits.
-    Does NOT call sys.exit() so the master process keeps running.
+    Master-launcher contract:
+        run(screen, clock) -> "done" | "skip" | "quit"
+    Reuses the passed-in screen/clock and never calls pygame.init()/quit().
 
-    Returns:
-        'win'  – player won a round and pressed any key; master proceeds
-        'quit' – Q/ESC pressed or window closed; master should exit cleanly
+    Called with no arguments it runs standalone (creates its own window), so
+    `python RPS_vs_Computer.py` still works unchanged.
     """
-    pygame.init()
-    screen = pygame.display.set_mode((config.WINDOW_WIDTH, config.WINDOW_HEIGHT))
-    pygame.display.set_caption(config.WINDOW_TITLE)
-    clock = pygame.time.Clock()
+    embedded = screen is not None
+    if not embedded:
+        pygame.init()
+        screen = pygame.display.set_mode((config.WINDOW_WIDTH, config.WINDOW_HEIGHT))
+        pygame.display.set_caption(config.WINDOW_TITLE)
+    if clock is None:
+        clock = pygame.time.Clock()
+
+    # When launched by the master hub, grab it for the skip button/hotkey hooks.
+    _m = None
+    if embedded:
+        import sys as _sys
+        _m = _sys.modules.get("master")
 
     font_huge   = pygame.font.SysFont("Arial", 88, bold=True)
     font_medium = pygame.font.SysFont("Arial", 36, bold=True)
@@ -169,7 +178,7 @@ def run():
         'scissor': _load_icon_surface(os.path.join(SCRIPT_DIR, 'images', 'Scissorimage.png'), config.ICON_SIZE),
     }
 
-    W, H   = config.WINDOW_WIDTH, config.WINDOW_HEIGHT
+    W, H   = screen.get_size()
     cx, cy = W // 2, H // 2
 
     # State machine: 'wait' -> 'countdown' -> 'result' -> 'lose_prompt' | 'win_prompt' | 'wait'
@@ -182,18 +191,20 @@ def run():
     prompt_start    = None
     live_choice     = None   # current live-detected RPS choice for top bar + icon
 
-    outcome = 'quit'
+    result  = "done"
     running = True
 
     while running:
         # ── Events ──────────────────────────────────────────────────────────
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
+                result = "quit"; running = False; break
+            if _m is not None and _m.check_skip(event):
+                result = "skip"; running = False; break
 
-            elif event.type == pygame.KEYDOWN:
-                if event.key in (pygame.K_q, pygame.K_ESCAPE):
-                    running = False
+            if event.type == pygame.KEYDOWN:
+                if _m is None and event.key in (pygame.K_q, pygame.K_ESCAPE):
+                    running = False; break          # standalone quit
 
                 elif state == 'wait' and event.key == pygame.K_SPACE:
                     computer_choice = random.choice(CHOICES)
@@ -201,8 +212,10 @@ def run():
                     countdown_start = time.time()
 
                 elif state == 'win_prompt':
-                    outcome = 'win'
-                    running = False
+                    result  = "done"               # player won → finished
+                    running = False; break
+        if not running:
+            break
 
         # ── Camera frame ─────────────────────────────────────────────────────
         ret, frame = cap.read()
@@ -305,22 +318,25 @@ def run():
         elif state == 'win_prompt':
             _overlay(screen, 0, cy - 100, W, 200, alpha=200)
             _text(screen, 'You win!', font_huge, config.GREEN, cx, cy - 55, center=True)
-            _text(screen, 'Press any key to progress  |  Q to quit',
+            _text(screen, 'Press any key to progress',
                   font_small, config.WHITE, cx, cy + 60, center=True)
 
         else:  # 'wait'
             _overlay(screen, 0, H - 54, W, 54)
-            _text(screen, 'Press SPACE to play  |  Q to quit',
+            _text(screen, 'Press SPACE to play',
                   font_small, config.GRAY, cx, H - 27, center=True)
 
+        if _m is not None:
+            _m.draw_skip_button(screen)
         pygame.display.flip()
         clock.tick(config.FPS)
 
     # ── Cleanup ──────────────────────────────────────────────────────────────
     pipe.pipe.close()
     cap.release()
-    pygame.quit()
-    return outcome
+    if not embedded:
+        pygame.quit()
+    return result
 
 
 if __name__ == '__main__':
