@@ -12,6 +12,7 @@ live feedback, but jitter does not count — only the moment SPACE is pressed.
 
 import random
 import subprocess
+import threading
 from enum import Enum, auto
 
 import cv2
@@ -96,15 +97,14 @@ class _PiCamera2:
 class _SubprocessCamera:
     """
     Reads raw YUV420 frames from rpicam-vid via stdout.
-    Works from any Python version/env because rpicam-vid is a system binary
-    that uses libcamera directly — bypassing the Python libcamera bindings.
+    A background thread does the blocking I/O so read() is always
+    non-blocking — the pygame event loop never stalls waiting for a frame.
     """
 
     def __init__(self, width: int, height: int) -> None:
         self._width = width
         self._height = height
         self._frame_bytes = width * height * 3 // 2  # I420 planar
-        # Kill any leftover rpicam-vid from a previous crashed session
         subprocess.run(['pkill', '-f', 'rpicam-vid'], stderr=subprocess.DEVNULL)
         self._proc = subprocess.Popen(
             [
@@ -116,19 +116,34 @@ class _SubprocessCamera:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
+        self._latest: np.ndarray | None = None
+        self._lock = threading.Lock()
+        self._running = True
+        self._thread = threading.Thread(target=self._reader, daemon=True)
+        self._thread.start()
+
+    def _reader(self) -> None:
+        while self._running:
+            raw = self._proc.stdout.read(self._frame_bytes)
+            if len(raw) < self._frame_bytes:
+                break
+            yuv = np.frombuffer(raw, dtype=np.uint8).reshape(
+                (self._height * 3 // 2, self._width)
+            )
+            with self._lock:
+                self._latest = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
 
     def read(self) -> tuple[bool, np.ndarray]:
-        raw = self._proc.stdout.read(self._frame_bytes)
-        if len(raw) < self._frame_bytes:
-            return False, None
-        yuv = np.frombuffer(raw, dtype=np.uint8).reshape(
-            (self._height * 3 // 2, self._width)
-        )
-        return True, cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
+        with self._lock:
+            if self._latest is None:
+                return False, None
+            return True, self._latest.copy()
 
     def release(self) -> None:
+        self._running = False
         self._proc.terminate()
         self._proc.wait()
+        self._thread.join(timeout=2)
 
 
 def _open_camera():
