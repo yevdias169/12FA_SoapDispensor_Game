@@ -20,6 +20,7 @@ Setup:
                         (picamera2 import fails gracefully → uses webcam instead)
 """
 
+import os
 import sys
 from pathlib import Path
 import numpy as np
@@ -28,12 +29,14 @@ import dlib
 import pygame
 from scipy.ndimage import distance_transform_edt
 
-# ── picamera2 or fallback ────────────────────────────────────────────────────
-try:
-    from picamera2 import Picamera2
-    HAS_PICAMERA = True
-except ImportError:
-    HAS_PICAMERA = False
+# Shared Pi-camera module lives in the Minigames/ directory (one level up).
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_MINIGAMES_DIR = os.path.dirname(_HERE)
+if _MINIGAMES_DIR not in sys.path:
+    sys.path.insert(0, _MINIGAMES_DIR)
+
+# Camera backend: "opencv" (webcam / macOS dev) | "rpicam" (Pi Camera Module).
+CAMERA_BACKEND = "opencv"
 
 # ── constants ────────────────────────────────────────────────────────────────
 WIN_W, WIN_H   = 960, 640
@@ -54,38 +57,27 @@ CAT_IMAGE      = Path(__file__).parent / "cat2.png"
 
 # ── camera helpers ───────────────────────────────────────────────────────────
 def open_camera():
-    if HAS_PICAMERA:
-        cam = Picamera2()
-        cfg = cam.create_preview_configuration(
-            main={"format": "RGB888", "size": (CAM_W, CAM_H)},
-            controls={"AfMode": 2},   # continuous autofocus (Module 3 supports this)
-        )
-        cam.configure(cfg)
-        cam.start()
-        print("Using picamera2 (Pi Camera Module 3)")
-        return cam
+    """Open the camera matching CAMERA_BACKEND. Both the Pi-camera source and
+    cv2.VideoCapture expose .read() -> (ok, bgr) and .release()."""
+    if CAMERA_BACKEND == "rpicam":
+        from pi_camera import RpiCamera
+        return RpiCamera(CAM_W, CAM_H)
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAM_W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
-    print("Using OpenCV VideoCapture (webcam fallback)")
     return cap
 
 
 def read_frame(cam):
     """Returns RGB (h, w, 3) uint8 or None on failure."""
-    if HAS_PICAMERA:
-        return cam.capture_array()          # already RGB888
-    ret, bgr = cam.read()
-    if not ret:
+    ok, bgr = cam.read()
+    if not ok or bgr is None:
         return None
     return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
 
 
 def close_camera(cam):
-    if HAS_PICAMERA:
-        cam.stop()
-    else:
-        cam.release()
+    cam.release()
 
 
 # ── cat image → binary edge mask ─────────────────────────────────────────────
@@ -168,22 +160,30 @@ def mouth_open(shape) -> bool:
 
 
 # ── main ──────────────────────────────────────────────────────────────────────
-def main():
-    # ---- pygame ----
-    pygame.init()
-    screen   = pygame.display.set_mode((WIN_W, WIN_H))
-    pygame.display.set_caption("Cat Tracing — Nose Drawing")
-    clock    = pygame.time.Clock()
+def run(screen=None, clock=None):
+    """Cat Tracing Game.
+
+    Master-launcher contract:
+        run(screen, clock) -> "done" | "skip" | "quit"
+    Reuses the passed-in screen/clock and never calls pygame.init()/quit().
+    Called with no arguments it runs standalone (creates its own window).
+    """
+    embedded = screen is not None
+    if not embedded:
+        pygame.init()
+        screen = pygame.display.set_mode((WIN_W, WIN_H))
+        pygame.display.set_caption("Cat Tracing — Nose Drawing")
+    if clock is None:
+        clock = pygame.time.Clock()
+
+    # When launched by the master hub, grab it for the skip button/hotkey hooks.
+    _m = sys.modules.get("master") if embedded else None
+
     font_lg  = pygame.font.SysFont("Arial", 26, bold=True)
     font_sm  = pygame.font.SysFont("Arial", 20)
 
-    # ---- reference cat ----
-    try:
-        cat_ref = load_cat_mask(CAT_IMAGE, WIN_W, WIN_H)
-    except FileNotFoundError as e:
-        print(e)
-        sys.exit(1)
-
+    # ---- reference cat ----  (raise on failure; master's wrapper catches it)
+    cat_ref  = load_cat_mask(CAT_IMAGE, WIN_W, WIN_H)
     cat_surf = mask_to_surface(cat_ref, CAT_TINT, OVERLAY_ALPHA)
 
     # ---- drawing canvas ----
@@ -192,11 +192,11 @@ def main():
 
     # ---- dlib face detector + shape predictor ----
     if not PREDICTOR_PATH.exists():
-        print(f"Missing landmark model: {PREDICTOR_PATH}")
-        print("Download with:")
-        print("  wget http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2")
-        print("  bzip2 -d shape_predictor_68_face_landmarks.dat.bz2")
-        sys.exit(1)
+        raise FileNotFoundError(
+            f"Missing landmark model: {PREDICTOR_PATH}. Download with: "
+            "wget http://dlib.net/files/shape_predictor_68_face_landmarks.dat.bz2 "
+            "&& bzip2 -d shape_predictor_68_face_landmarks.dat.bz2"
+        )
     detector  = dlib.get_frontal_face_detector()
     predictor = dlib.shape_predictor(str(PREDICTOR_PATH))
 
@@ -207,14 +207,20 @@ def main():
     score_str = None
     chamfer   = None
 
-    while True:
+    result, running = "skip", True
+    while running:
         # ── events ──
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
-                close_camera(cam); pygame.quit(); sys.exit()
+                result, running = "quit", False
+                break
+            if _m is not None and _m.check_skip(ev):
+                result, running = "skip", False
+                break
             if ev.type == pygame.KEYDOWN:
-                if ev.key in (pygame.K_ESCAPE, pygame.K_q):
-                    close_camera(cam); pygame.quit(); sys.exit()
+                if _m is None and ev.key in (pygame.K_ESCAPE, pygame.K_q):
+                    running = False
+                    break
                 if ev.key == pygame.K_c:
                     drawing[:] = 0
                     draw_surf  = pygame.Surface((WIN_W, WIN_H), pygame.SRCALPHA)
@@ -224,6 +230,8 @@ def main():
                 if ev.key == pygame.K_s:
                     chamfer   = chamfer_distance(cat_ref, drawing)
                     score_str = f"Chamfer: {chamfer:.1f} px  —  {score_label(chamfer)}"
+        if not running:
+            break
 
         # ── camera frame ──
         frame = read_frame(cam)
@@ -288,12 +296,20 @@ def main():
         status = f"{'[PEN DOWN]' if is_open else '[PEN UP  ]'}  nose at {nose_pt}" \
                  if nose_pt else "searching..."
         screen.blit(font_sm.render(status, True, (140, 200, 255)), (10, 40))
-        screen.blit(font_sm.render("S = Score   C = Clear   ESC = Quit",
+        screen.blit(font_sm.render("S = Score   C = Clear   ESC/SKIP = exit",
                                    True, (100, 100, 100)), (10, WIN_H - 28))
 
+        if _m is not None:
+            _m.draw_skip_button(screen)
         pygame.display.flip()
         clock.tick(60)
 
+    # ── cleanup ──
+    close_camera(cam)
+    if not embedded:
+        pygame.quit()
+    return result
+
 
 if __name__ == "__main__":
-    main()
+    run()

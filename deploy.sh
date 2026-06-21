@@ -33,10 +33,12 @@ ssh "${PI_HOST}" '
   sed -i "/CAMERA_BACKEND/ s/\"opencv\"/\"rpicam\"/" Guessing_Game/config.py &&
   sed -i "/CAMERA_BACKEND/ s/\"opencv\"/\"rpicam\"/" RPS-Game/config.py &&
   sed -i "/CAMERA_BACKEND/ s/\"opencv\"/\"rpicam\"/" rubiks-vision/config.py &&
+  sed -i "/CAMERA_BACKEND/ s/\"opencv\"/\"rpicam\"/" cat/cat_tracing_game.py &&
   echo "   master.py:    " && grep CAMERA_BACKEND ~/12FA_SoapDispensor_Game/master.py | head -1 &&
   echo "   Guessing_Game:" && grep CAMERA_BACKEND Guessing_Game/config.py | head -1 &&
   echo "   RPS-Game:     " && grep CAMERA_BACKEND RPS-Game/config.py | head -1 &&
-  echo "   rubiks-vision:" && grep CAMERA_BACKEND rubiks-vision/config.py | head -1
+  echo "   rubiks-vision:" && grep CAMERA_BACKEND rubiks-vision/config.py | head -1 &&
+  echo "   cat:          " && grep CAMERA_BACKEND cat/cat_tracing_game.py | head -1
 '
 
 echo ""

@@ -250,6 +250,13 @@ def run_emotion(screen, clock):
     return result
 
 
+def run_cat(screen, clock):
+    _front(MINIGAMES_DIR)
+    _front(os.path.join(MINIGAMES_DIR, "cat"))
+    from cat_tracing_game import run as run_cat_game
+    return run_cat_game(screen, clock)
+
+
 # ---------------------------------------------------------------------------
 # Registry — (display name, callable). Order == "All Games" play order.
 # ---------------------------------------------------------------------------
@@ -260,6 +267,7 @@ MINIGAMES = [
     ("Finger Guessing",   run_guessing),
     ("Rock Paper Scissor", run_rps),
     ("Rubik's Checker",   run_rubiks),
+    ("Cat Tracing",       run_cat),
 ]
 
 
