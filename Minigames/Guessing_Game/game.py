@@ -104,6 +104,8 @@ class _SubprocessCamera:
         self._width = width
         self._height = height
         self._frame_bytes = width * height * 3 // 2  # I420 planar
+        # Kill any leftover rpicam-vid from a previous crashed session
+        subprocess.run(['pkill', '-f', 'rpicam-vid'], stderr=subprocess.DEVNULL)
         self._proc = subprocess.Popen(
             [
                 'rpicam-vid', '-t', '0',
