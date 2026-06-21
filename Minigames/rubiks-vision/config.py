@@ -1,12 +1,19 @@
 """
 config.py — single source of truth for all tunable parameters.
-Change CAMERA_BACKEND to "picamera2" on a Raspberry Pi with ribbon-cable camera.
+CAMERA_BACKEND is auto-detected (Pi camera vs webcam); override with the
+environment variable MINIGAME_CAMERA_BACKEND=opencv|rpicam|picamera2.
 """
+
+import os
+import shutil
 
 # ---------------------------------------------------------------------------
 # Camera
 # ---------------------------------------------------------------------------
-CAMERA_BACKEND: str = "opencv"   # "opencv" | "picamera2"
+# Auto-detect: the Raspberry Pi ships the `rpicam-vid` binary (Pi Camera Module
+# via the shared pi_camera.RpiCamera); dev machines fall back to a webcam.
+CAMERA_BACKEND: str = os.environ.get("MINIGAME_CAMERA_BACKEND") or (
+    "rpicam" if shutil.which("rpicam-vid") else "opencv")
 CAMERA_INDEX: int = -1           # -1 = auto-detect first working camera (handles macOS Continuity Camera)
 FRAME_WIDTH: int = 1280
 FRAME_HEIGHT: int = 720

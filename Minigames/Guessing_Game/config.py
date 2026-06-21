@@ -1,4 +1,5 @@
 import os
+import shutil
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.join(_HERE, '..')
@@ -7,10 +8,14 @@ _ROOT = os.path.join(_HERE, '..')
 MODEL_PATH          = os.path.join(_ROOT, 'model.p')
 HAND_LANDMARKER_PATH = os.path.join(_ROOT, 'hand_landmarker.task')
 
-# Camera backend:
+# Camera backend — auto-detected: the Raspberry Pi ships the `rpicam-vid`
+# binary (Pi Camera Module via pi_camera.RpiCamera); dev machines don't and
+# fall back to a USB/built-in webcam. Override with env MINIGAME_CAMERA_BACKEND.
 #   "opencv"    — USB webcam / built-in camera (macOS, Pi USB)
-#   "picamera2" — Raspberry Pi Camera Module via ribbon cable
-CAMERA_BACKEND = "opencv"
+#   "rpicam"    — Raspberry Pi Camera Module via rpicam-vid (shared pi_camera.py)
+#   "picamera2" — Pi Camera Module via picamera2 bindings (system Python only)
+CAMERA_BACKEND = os.environ.get("MINIGAME_CAMERA_BACKEND") or (
+    "rpicam" if shutil.which("rpicam-vid") else "opencv")
 
 # Resolution used when capturing frames.
 # picamera2 requires explicit dimensions; opencv uses these as hints.

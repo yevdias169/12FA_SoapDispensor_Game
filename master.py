@@ -20,6 +20,7 @@ dependency only breaks that game, not the launcher.
 """
 
 import os
+import shutil
 import sys
 import traceback
 
@@ -38,7 +39,12 @@ sys.modules.setdefault("master", sys.modules[__name__])
 WINDOW_W, WINDOW_H = 960, 720
 FPS = 60
 
-CAMERA_BACKEND = "opencv"   # "opencv" (webcam, macOS dev) | "rpicam" (Pi camera)
+# Auto-detect the camera backend: the Raspberry Pi ships the `rpicam-vid`
+# binary (Pi Camera Module via pi_camera.RpiCamera); dev machines don't, so
+# they fall back to a USB/built-in webcam. Override with the environment
+# variable MINIGAME_CAMERA_BACKEND=opencv|rpicam.
+CAMERA_BACKEND = os.environ.get("MINIGAME_CAMERA_BACKEND") or (
+    "rpicam" if shutil.which("rpicam-vid") else "opencv")
 
 FONT_NAME   = "Arial"
 FONT_TITLE  = 48
@@ -362,12 +368,16 @@ def _launch(fn, screen, clock):
 # ---------------------------------------------------------------------------
 
 def main():
+    # --all : kiosk mode — skip the menu, run every game in order, then exit
+    # (returns control to whatever launched master.py, e.g. the web app).
+    auto_all = "--all" in sys.argv
+
     pygame.init()
     screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
     pygame.display.set_caption("Minigame Hub")
     clock = pygame.time.Clock()
 
-    state = MENU
+    state = PLAYING_SEQUENCE if auto_all else MENU
     seq_idx = 0
     running = True
 
@@ -410,7 +420,12 @@ def main():
             else:               # "done" or "skip" -> advance to next game
                 seq_idx += 1
                 if seq_idx >= len(MINIGAMES):
-                    state = MENU
+                    # In kiosk (--all) mode, exit when the sequence finishes so
+                    # control returns to the launcher; otherwise back to menu.
+                    if auto_all:
+                        running = False
+                    else:
+                        state = MENU
 
     pygame.quit()
     sys.exit(0)

@@ -21,6 +21,7 @@ Setup:
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 import numpy as np
@@ -35,8 +36,11 @@ _MINIGAMES_DIR = os.path.dirname(_HERE)
 if _MINIGAMES_DIR not in sys.path:
     sys.path.insert(0, _MINIGAMES_DIR)
 
-# Camera backend: "opencv" (webcam / macOS dev) | "rpicam" (Pi Camera Module).
-CAMERA_BACKEND = "opencv"
+# Camera backend — auto-detected: the Raspberry Pi ships the `rpicam-vid`
+# binary (Pi Camera Module via pi_camera.RpiCamera); dev machines fall back to
+# a webcam. Override with env MINIGAME_CAMERA_BACKEND=opencv|rpicam.
+CAMERA_BACKEND = os.environ.get("MINIGAME_CAMERA_BACKEND") or (
+    "rpicam" if shutil.which("rpicam-vid") else "opencv")
 
 # ── constants ────────────────────────────────────────────────────────────────
 WIN_W, WIN_H   = 960, 640
