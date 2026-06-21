@@ -10,11 +10,21 @@ Switching from macOS to Pi ribbon-cable camera:
 from __future__ import annotations
 
 import abc
+import os
+import sys
 from types import TracebackType
 from typing import Type
 
 import cv2
 import numpy as np
+
+# Shared Pi-camera module lives in the Minigames/ directory (three levels up:
+# Minigames/rubiks-vision/src/camera.py -> Minigames/).
+_MINIGAMES_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+)
+if _MINIGAMES_DIR not in sys.path:
+    sys.path.insert(0, _MINIGAMES_DIR)
 
 
 class CameraSource(abc.ABC):
@@ -123,7 +133,13 @@ def create_camera(cfg) -> CameraSource:  # type: ignore[type-arg]
         return OpenCVCamera(cfg.CAMERA_INDEX, cfg.FRAME_WIDTH, cfg.FRAME_HEIGHT)
     elif backend == "picamera2":
         return PiCamera2Camera(cfg.FRAME_WIDTH, cfg.FRAME_HEIGHT)
+    elif backend == "rpicam":
+        # Shared ironclad Pi Camera Module source. flip=True so read() returns
+        # mirrored frames, matching OpenCVCamera/PiCamera2Camera behaviour.
+        from pi_camera import RpiCamera
+        return RpiCamera(cfg.FRAME_WIDTH, cfg.FRAME_HEIGHT, flip=True)
     else:
         raise ValueError(
-            f"Unknown CAMERA_BACKEND={backend!r}. Choose 'opencv' or 'picamera2'."
+            f"Unknown CAMERA_BACKEND={backend!r}. "
+            "Choose 'opencv', 'rpicam', or 'picamera2'."
         )

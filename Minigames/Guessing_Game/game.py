@@ -10,14 +10,20 @@ official guess. The model runs continuously while waiting so the user sees
 live feedback, but jitter does not count — only the moment SPACE is pressed.
 """
 
+import os
 import random
-import subprocess
-import threading
+import sys
 from enum import Enum, auto
 
 import cv2
 import numpy as np
 import pygame
+
+# Shared Pi-camera module lives in the Minigames/ directory (two levels up).
+_MINIGAMES_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _MINIGAMES_DIR not in sys.path:
+    sys.path.insert(0, _MINIGAMES_DIR)
+from pi_camera import RpiCamera
 
 from . import config
 from .model_wrapper import ModelWrapper
@@ -94,58 +100,6 @@ class _PiCamera2:
         self._cam.stop()
 
 
-class _SubprocessCamera:
-    """
-    Reads raw YUV420 frames from rpicam-vid via stdout.
-    A background thread does the blocking I/O so read() is always
-    non-blocking — the pygame event loop never stalls waiting for a frame.
-    """
-
-    def __init__(self, width: int, height: int) -> None:
-        self._width = width
-        self._height = height
-        self._frame_bytes = width * height * 3 // 2  # I420 planar
-        subprocess.run(['pkill', '-f', 'rpicam-vid'], stderr=subprocess.DEVNULL)
-        self._proc = subprocess.Popen(
-            [
-                'rpicam-vid', '-t', '0',
-                '--width', str(width), '--height', str(height),
-                '--codec', 'yuv420', '--framerate', '30',
-                '-n', '-o', '-',
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
-        self._latest: np.ndarray | None = None
-        self._lock = threading.Lock()
-        self._running = True
-        self._thread = threading.Thread(target=self._reader, daemon=True)
-        self._thread.start()
-
-    def _reader(self) -> None:
-        while self._running:
-            raw = self._proc.stdout.read(self._frame_bytes)
-            if len(raw) < self._frame_bytes:
-                break
-            yuv = np.frombuffer(raw, dtype=np.uint8).reshape(
-                (self._height * 3 // 2, self._width)
-            )
-            with self._lock:
-                self._latest = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_I420)
-
-    def read(self) -> tuple[bool, np.ndarray]:
-        with self._lock:
-            if self._latest is None:
-                return False, None
-            return True, self._latest.copy()
-
-    def release(self) -> None:
-        self._running = False
-        self._proc.terminate()
-        self._proc.wait()
-        self._thread.join(timeout=2)
-
-
 def _open_camera():
     """Open the camera source specified by config.CAMERA_BACKEND.
 
@@ -155,7 +109,9 @@ def _open_camera():
     if backend == "picamera2":
         return _PiCamera2(config.FRAME_WIDTH, config.FRAME_HEIGHT)
     if backend == "rpicam":
-        return _SubprocessCamera(config.FRAME_WIDTH, config.FRAME_HEIGHT)
+        # Shared ironclad Pi Camera Module source (frames not flipped here;
+        # the game loop mirrors the frame itself, as with the opencv path).
+        return RpiCamera(config.FRAME_WIDTH, config.FRAME_HEIGHT)
 
     # opencv path — try configured index, then fall back
     cap = cv2.VideoCapture(config.CAMERA_INDEX)

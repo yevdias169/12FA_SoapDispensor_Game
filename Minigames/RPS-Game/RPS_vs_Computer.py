@@ -12,11 +12,17 @@ import cv2
 import numpy as np
 import os
 import random
+import sys
 import time
 
 import pygame
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Shared Pi-camera module lives in the Minigames/ directory (one level up).
+_MINIGAMES_DIR = os.path.dirname(SCRIPT_DIR)
+if _MINIGAMES_DIR not in sys.path:
+    sys.path.insert(0, _MINIGAMES_DIR)
 
 from utils_display import DisplayHand
 from utils_mediapipe import MediaPipeHand
@@ -97,6 +103,19 @@ def _load_icon_surface(path: str, size: int) -> pygame.Surface:
 # Vision helpers
 # ---------------------------------------------------------------------------
 
+def _open_camera():
+    """Open the camera source specified by config.CAMERA_BACKEND.
+
+    Returns an object with .read() -> (ok, bgr_frame) and .release().
+    The game loop mirrors frames itself, so the camera does not flip.
+    """
+    backend = getattr(config, "CAMERA_BACKEND", "opencv")
+    if backend == "rpicam":
+        from pi_camera import RpiCamera
+        return RpiCamera(config.FRAME_WIDTH, config.FRAME_HEIGHT)
+    return cv2.VideoCapture(config.CAMERA_INDEX)
+
+
 def _draw_hand_skeleton(img, disp, param):
     """Draw the hand skeleton onto the OpenCV frame before pygame conversion."""
     img_height, img_width, _ = img.shape
@@ -141,7 +160,7 @@ def run():
 
     pipe = MediaPipeHand(static_image_mode=False, max_num_hands=1)
     disp = DisplayHand(max_num_hands=1)
-    cap  = cv2.VideoCapture(config.CAMERA_INDEX)
+    cap  = _open_camera()
     gest = GestureRecognition(mode='eval')
 
     icons = {

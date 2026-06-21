@@ -5,7 +5,14 @@
 
 import cv2
 import numpy as np
-import open3d as o3d
+
+# open3d is only needed for the optional 3D-visualization paths (draw3d=True).
+# It has no aarch64 wheel for the Pi's Python 3.12 conda env, so import it
+# lazily: the 2D skeleton drawing the games use works fine without it.
+try:
+    import open3d as o3d
+except ImportError:
+    o3d = None
 
 
 # Define default camera intrinsic

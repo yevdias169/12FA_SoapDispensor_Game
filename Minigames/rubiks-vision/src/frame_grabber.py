@@ -13,6 +13,7 @@ being fed the same old frame repeatedly, making it look like the verdict held.
 from __future__ import annotations
 
 import threading
+import time
 
 import numpy as np
 
@@ -34,6 +35,10 @@ class FrameGrabber:
             if ok and frame is not None:
                 with self._lock:
                     self._frame = frame
+            # Cap the grab loop at ~200 Hz. For blocking cameras (OpenCV) this
+            # is a no-op; for already-threaded sources (RpiCamera) whose read()
+            # returns instantly, it prevents a 100%-CPU busy-spin on the Pi.
+            time.sleep(0.005)
 
     def read_latest(self) -> np.ndarray | None:
         """Return the most recent BGR frame, or None if none captured yet."""
